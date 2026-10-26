@@ -1,0 +1,10 @@
+target/
+.idea/
+*.iml
+.vscode/
+.env
+*.log
+.DS_Store
+
+/src/main/java/com/example/damai/common/web/
+/src/test/java/com/example/damai/common/web/

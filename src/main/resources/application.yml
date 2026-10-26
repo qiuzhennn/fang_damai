@@ -1,0 +1,67 @@
+app:
+  admin-bootstrap:
+    enabled: ${ADMIN_BOOTSTRAP_ENABLED:false}
+    username: ${ADMIN_BOOTSTRAP_USERNAME:}
+    password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+  rabbitmq:
+    init-on-startup: ${RABBITMQ_INIT_ON_STARTUP:false}
+
+  order:
+    relay:
+      enabled: ${ORDER_RELAY_ENABLED:true}
+      poll-ms: 1000
+
+    consumer:
+      enabled: ${ORDER_CONSUMER_ENABLED:true}
+    recovery:
+      enabled: ${ORDER_RECOVERY_ENABLED:false}
+
+
+
+
+spring:
+  application:
+    name: fang-damai
+  datasource:
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:damai}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}
+    hikari:
+      # 每次创建数据库连接时，将该连接的会话时区设置为北京时间
+      connection-init-sql: "SET time_zone = '+08:00'"
+
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:127.0.0.1}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:damai}
+    password: ${RABBITMQ_PASSWORD}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+
+server:
+  port: ${SERVER_PORT:8080}
+
+
+logging:
+  level:
+    # 演出、场次相关SQL
+    com.example.damai.modules.program.mapper: DEBUG
+
+    # 票档、库存相关SQL
+    com.example.damai.modules.ticket.mapper: DEBUG
+
+    # 订单相关SQL
+    com.example.damai.modules.order.mapper: DEBUG
+
+    # 单独隐藏每10秒扫描超时订单的SQL
+    com.example.damai.modules.order.mapper.TicketOrderMapper.selectExpiredIds: INFO
+    com.example.damai.modules.ticket.mapper.StockReleaseTaskMapper.selectPendingIds: INFO
