@@ -22,6 +22,7 @@ app:
 spring:
   application:
     name: fang-damai
+
   datasource:
     url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:damai}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: ${DB_USERNAME:root}
@@ -36,6 +37,14 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+  session:
+    # 连续30分钟没有使用该会话的请求，登录状态失效
+    timeout: "${SESSION_TIMEOUT:30m}"
+
+    data:
+      redis:
+        # 登录会话写入Redis
+        namespace: fang-damai:session
 
   rabbitmq:
     host: ${RABBITMQ_HOST:127.0.0.1}
