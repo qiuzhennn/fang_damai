@@ -26,20 +26,16 @@ import java.util.UUID;
 )
 public class OrderMessageRelay {
 
-    private static final Logger log =
-            LoggerFactory.getLogger(OrderMessageRelay.class);
+    private static final Logger log = LoggerFactory.getLogger(OrderMessageRelay.class);
 
     // Redis Stream Key
-    private static final String STREAM =
-            TicketRedisKeys.orderCreateOutboxStream();
+    private static final String STREAM = TicketRedisKeys.orderCreateOutboxStream();
 
     // 同一个逻辑消费组，多个实例可共同处理任务
-    private static final String GROUP =
-            "damai-order-relay-v1";
+    private static final String GROUP = TicketRedisKeys.orderCreateRelayGroup();
 
     // Pending 任务的最小空闲时间
-    private static final Duration MIN_IDLE =
-            Duration.ofMinutes(2);
+    private static final Duration MIN_IDLE = Duration.ofMinutes(2);
     // 增大单批领取数量，减少抢票高峰时任务跨轮等待的次数。
     private static final int BATCH_SIZE = 50;
 
@@ -47,8 +43,7 @@ public class OrderMessageRelay {
     private final OrderMessagePublisher publisher;
 
     // 每个进程使用不同的消费者名称
-    private final String consumerName =
-            "relay-" + UUID.randomUUID();
+    private final String consumerName = "relay-" + UUID.randomUUID();
 
     private volatile boolean groupReady = false;
 

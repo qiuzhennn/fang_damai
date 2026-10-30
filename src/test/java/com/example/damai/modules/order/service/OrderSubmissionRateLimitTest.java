@@ -4,6 +4,7 @@ import com.example.damai.common.exception.BusinessException;
 import com.example.damai.modules.order.dto.OrderCreateRequest;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
 import com.example.damai.modules.order.ratelimit.OrderAdmissionGuard;
+import com.example.damai.modules.order.ratelimit.OrderBacklogGuard;
 import com.example.damai.modules.order.ratelimit.PurchaseRateLimiter;
 import com.example.damai.modules.ticket.redis.StockReservationResult;
 import com.example.damai.modules.ticket.service.TicketStockReservationService;
@@ -27,13 +28,16 @@ class OrderSubmissionRateLimitTest {
 
         OrderAdmissionGuard admissionGuard =
                 mock(OrderAdmissionGuard.class);
+        OrderBacklogGuard backlogGuard =
+                mock(OrderBacklogGuard.class);
 
         OrderSubmissionService service = new OrderSubmissionService(
                 orderMapper,
                 orderService,
                 reservationService,
                 rateLimiter,
-                admissionGuard
+                admissionGuard,
+                backlogGuard
         );
 
         OrderCreateRequest request = new OrderCreateRequest();
@@ -81,5 +85,6 @@ class OrderSubmissionRateLimitTest {
                 1
         );
         verifyNoMoreInteractions(reservationService);
+
     }
 }

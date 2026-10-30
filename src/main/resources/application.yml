@@ -26,6 +26,9 @@ app:
     admission:
       # 当前Java实例最多同时执行多少个新购买受理请求。
       max-concurrent: ${ORDER_ADMISSION_MAX_CONCURRENT:50}
+    backlog:
+      # 尚未确认转发完成的任务达到阈值时，暂停受理新购买。
+      max-outbox-pending: ${ORDER_BACKLOG_MAX_OUTBOX_PENDING:1000}
 
 
 
@@ -51,7 +54,7 @@ spring:
 
   session:
     # 连续30分钟没有使用该会话的请求，登录状态失效
-    timeout: "${SESSION_TIMEOUT:30m}"
+    timeout: "${SESSION_TIMEOUT:240m}"
 
     data:
       redis:

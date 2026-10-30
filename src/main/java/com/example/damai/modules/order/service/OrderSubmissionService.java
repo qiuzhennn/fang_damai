@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
+import com.example.damai.modules.order.ratelimit.OrderBacklogGuard;
 
 /**
  * 下单入口：识别重复请求，复用已有订单。
@@ -38,6 +39,7 @@ public class OrderSubmissionService {
 
     private final PurchaseRateLimiter purchaseRateLimiter;
     private final OrderAdmissionGuard orderAdmissionGuard;
+    private final OrderBacklogGuard orderBacklogGuard;
 
 
     private static final Logger log =
@@ -48,13 +50,15 @@ public class OrderSubmissionService {
             TicketOrderService orderService,
             TicketStockReservationService reservationService,
             PurchaseRateLimiter purchaseRateLimiter,
-            OrderAdmissionGuard orderAdmissionGuard) {
+            OrderAdmissionGuard orderAdmissionGuard,
+            OrderBacklogGuard orderBacklogGuard) {
 
         this.orderMapper = orderMapper;
         this.orderService = orderService;
         this.reservationService = reservationService;
         this.purchaseRateLimiter = purchaseRateLimiter;
         this.orderAdmissionGuard = orderAdmissionGuard;
+        this.orderBacklogGuard = orderBacklogGuard;
 
     }
 
@@ -374,6 +378,9 @@ public class OrderSubmissionService {
             orderAdmissionGuard.leave();
         }
 
+        // 用户和票档额度允许后，再检查转发链路是否仍能承接新任务。
+        // 积压达到阈值时，停止当前购买，此时尚未预扣库存。
+        orderBacklogGuard.check();
 
         // 3. 只有新请求才检查是否允许购买
         //

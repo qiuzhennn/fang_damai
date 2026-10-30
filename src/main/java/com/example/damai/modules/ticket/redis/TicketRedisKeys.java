@@ -56,5 +56,13 @@ public final class TicketRedisKeys {
         return "fang-damai:ticket:purchase-info-version";
     }
 
+    /**
+     * 建单任务转发使用的消费组。
+     * Relay与积压检查必须查看同一个组，才能判断实际待转发数量。
+     */
+    public static String orderCreateRelayGroup() {
+        return "damai-order-relay-v1";
+    }
+
     // TODO: 当前按单机Redis设计；接入Redis Cluster前，需重新设计库存与请求Key的同槽方案，不能直接沿用多Key脚本。
 }

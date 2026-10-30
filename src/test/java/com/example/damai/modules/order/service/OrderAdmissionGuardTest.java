@@ -4,6 +4,7 @@ import com.example.damai.common.exception.BusinessException;
 import com.example.damai.modules.order.dto.OrderCreateRequest;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
 import com.example.damai.modules.order.ratelimit.OrderAdmissionGuard;
+import com.example.damai.modules.order.ratelimit.OrderBacklogGuard;
 import com.example.damai.modules.order.ratelimit.PurchaseRateLimiter;
 import com.example.damai.modules.ticket.service.TicketStockReservationService;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,9 @@ class OrderAdmissionGuardTest {
     private final PurchaseRateLimiter rateLimiter =
             mock(PurchaseRateLimiter.class);
 
+    private final OrderBacklogGuard backlogGuard =
+            mock(OrderBacklogGuard.class);
+
     // 故意只设置一个名额，准确制造名额耗尽的场景。
     private final OrderAdmissionGuard admissionGuard =
             new OrderAdmissionGuard(1);
@@ -37,7 +41,8 @@ class OrderAdmissionGuardTest {
                     orderService,
                     reservationService,
                     rateLimiter,
-                    admissionGuard
+                    admissionGuard,
+                    backlogGuard
             );
 
     @Test
@@ -112,6 +117,7 @@ class OrderAdmissionGuardTest {
         );
         verifyNoMoreInteractions(reservationService);
         verifyNoInteractions(orderMapper);
+        verify(backlogGuard).check();
     }
 
     private OrderCreateRequest newRequest() {
