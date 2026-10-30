@@ -9,10 +9,7 @@ import com.example.damai.modules.order.entity.TicketOrder;
 import com.example.damai.modules.order.mapper.AsyncOrderGuardMapper;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
 import com.example.damai.modules.order.mq.OrderCreateMessage;
-import com.example.damai.modules.program.entity.Event;
 import com.example.damai.modules.program.entity.EventSession;
-import com.example.damai.modules.program.mapper.EventMapper;
-import com.example.damai.modules.program.mapper.EventSessionMapper;
 import com.example.damai.modules.ticket.entity.TicketCategory;
 import com.example.damai.modules.ticket.mapper.TicketCategoryMapper;
 import com.example.damai.modules.ticket.redis.TicketPurchaseCache;
@@ -61,8 +58,7 @@ public class TicketOrderService {
 
 
     /**
-     * 原同步建单入口。
-     * 保持已有同步下单语义不变。
+     * 同步下单：在当前事务中锁定 MySQL 库存并创建待支付订单。
      */
     @Transactional
     public Long create(
@@ -201,8 +197,7 @@ public class TicketOrderService {
             );
         }
 
-        // 6. 方法通过Spring事务代理正常返回，
-        // 意味着事务提交成功。
+        // Guard、库存和订单交给当前事务统一提交，调用方再确认 Redis 建单结果。
         return orderId;
     }
 

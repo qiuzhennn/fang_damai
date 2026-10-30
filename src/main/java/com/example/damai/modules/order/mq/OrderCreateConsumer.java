@@ -46,7 +46,6 @@ public class OrderCreateConsumer {
     public void onMessage(
             Message rawMessage,
             Channel channel) throws IOException {
-
         long deliveryTag =
                 rawMessage.getMessageProperties().getDeliveryTag();
 
@@ -87,7 +86,7 @@ public class OrderCreateConsumer {
                     outboxId
             );
 
-            // 3. 执行业务处理
+            // 3. 按购买请求协调建单或复用已有订单，正常完成后再确认消息。
             orderCreateService.process(message, outboxId);
 
         } catch (Exception exception) {
@@ -98,9 +97,7 @@ public class OrderCreateConsumer {
                     exception
             );
 
-            // 不立即重新入队。
-           // 交由正常建单队列已配置的DLX策略转入死信队列。
-            //改成 false 后，RabbitMQ 会根据正常队列的死信策略处理消息。
+            // 购买结果未确认，交给已配置的死信恢复流程核对，不立即重新入队。
             channel.basicNack(deliveryTag, false, false);
             return;
         }

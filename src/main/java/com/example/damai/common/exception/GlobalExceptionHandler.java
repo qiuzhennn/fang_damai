@@ -126,6 +126,11 @@ public class GlobalExceptionHandler {
             // 服务暂时无法完成资料加载，客户端可以稍后重试
             case "PURCHASE_INFO_LOADING" -> HttpStatus.SERVICE_UNAVAILABLE;
 
+            // 当前购买请求超过用户或票档的受理额度。
+            // 本次调用尚未预扣库存，提示稍后重试，不能展示成门票售罄。
+            case "USER_RATE_LIMITED",
+                 "TICKET_BUSY" -> HttpStatus.TOO_MANY_REQUESTS;
+
             default -> HttpStatus.BAD_REQUEST;
         };
 

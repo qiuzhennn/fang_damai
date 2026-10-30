@@ -48,7 +48,4 @@ public class OrderCreateRequest {
     public void setRequestId(String requestId) {
         this.requestId = requestId;
     }
-    // TODO: 在Redis中原子记录请求参数和预扣结果，避免重试重复扣减。
-// TODO: 在订单表增加请求标识及唯一约束，防止数据库重复创建订单。
-// TODO: 前端为新购买生成requestId，超时重试复用，不能每次发送都重新生成。
 }

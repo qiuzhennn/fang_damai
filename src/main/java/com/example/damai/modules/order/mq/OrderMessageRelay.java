@@ -1,4 +1,3 @@
-
 package com.example.damai.modules.order.mq;
 
 import com.example.damai.modules.ticket.redis.TicketRedisKeys;
@@ -41,8 +40,8 @@ public class OrderMessageRelay {
     // Pending 任务的最小空闲时间
     private static final Duration MIN_IDLE =
             Duration.ofMinutes(2);
-
-    private static final int BATCH_SIZE = 10;
+    // 增大单批领取数量，减少抢票高峰时任务跨轮等待的次数。
+    private static final int BATCH_SIZE = 50;
 
     private final StringRedisTemplate redisTemplate;
     private final OrderMessagePublisher publisher;
@@ -200,13 +199,10 @@ public class OrderMessageRelay {
         }
 
         for (MapRecord<String, Object, Object> record : records) {
-
             try {
                 processOne(record);
-
             } catch (Exception e) {
-
-                // 不 XACK，保留 Pending 任务
+                // 当前任务未确认完成转发，保留 Pending，供后续核对或重试。
                 log.error(
                         "建单任务转发失败，outboxId={}",
                         record.getId().getValue(),
@@ -295,10 +291,10 @@ public class OrderMessageRelay {
             );
         }
 
-        // 关键步骤：等待 RabbitMQ 发布确认
+        // 等待 RabbitMQ 确认任务已成功发布，失败时由上层保留 Pending。
         publisher.publish(message, outboxId);
 
-        // 只有 Publisher 正常确认后才 XACK
+        // 发布已确认后，再确认这条 Stream 任务完成转发。
         acknowledge(record);
 
         log.info(

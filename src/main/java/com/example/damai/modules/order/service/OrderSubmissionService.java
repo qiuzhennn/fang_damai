@@ -6,9 +6,9 @@ import com.example.damai.modules.order.dto.OrderCreateRequest;
 import com.example.damai.modules.order.entity.TicketOrder;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
 import com.example.damai.modules.order.mq.OrderCreateMessage;
+import com.example.damai.modules.order.ratelimit.PurchaseRateLimiter;
 import com.example.damai.modules.ticket.redis.StockReservationResult;
 import com.example.damai.modules.ticket.redis.TicketPurchaseCache.PurchaseInfo;
-import com.example.damai.modules.ticket.redis.TicketRedisKeys;
 import com.example.damai.modules.ticket.service.TicketStockReservationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,14 +35,22 @@ public class OrderSubmissionService {
     private final TicketOrderService orderService;
 
     private final TicketStockReservationService reservationService;
+
+    private final PurchaseRateLimiter purchaseRateLimiter;
+
     private static final Logger log =
             LoggerFactory.getLogger(OrderSubmissionService.class);
 
-    public OrderSubmissionService(TicketOrderMapper orderMapper, TicketOrderService orderService,TicketStockReservationService reservationService
-            ) {
+    public OrderSubmissionService(
+            TicketOrderMapper orderMapper,
+            TicketOrderService orderService,
+            TicketStockReservationService reservationService,
+            PurchaseRateLimiter purchaseRateLimiter) {
+
         this.orderMapper = orderMapper;
         this.orderService = orderService;
-        this.reservationService=reservationService;
+        this.reservationService = reservationService;
+        this.purchaseRateLimiter = purchaseRateLimiter;
     }
 
 
@@ -326,12 +334,38 @@ public class OrderSubmissionService {
             return previous;
         }
 
+        //当这不是重复请求时，检查是否频繁购买
+        try {
+            purchaseRateLimiter.check(userId, request.getTicketCategoryId());
+
+        } catch (BusinessException exception) {
+            // 限流判断期间，另一个相同请求可能已经完成Redis预扣。
+            // 再核对一次，避免将已经受理的购买误报为新购买被拒绝。
+            StockReservationResult latest =
+                    reservationService.readAsyncRequestState(
+                            userId,
+                            request.getRequestId(),
+                            request.getTicketCategoryId(),
+                            request.getQuantity()
+                    );
+
+            if (latest != null) {
+                // 同一次购买已经受理，返回它的实际处理阶段。
+                // 不再次预扣库存，也不再次登记建单任务。
+                return latest;
+            }
+
+            // 当前仍未查到原购买已受理，保留本次限流拒绝结果。
+            // 这不代表另一个并发调用之后一定不会受理成功。
+            throw exception;
+        }
+
+
         // 3. 只有新请求才检查是否允许购买
         //
         // 复用同步流程已有的校验能力。
         // 价格和演出时间均来自服务端。
-        PurchaseInfo info =
-                orderService.validatePurchase(request);
+        PurchaseInfo info = orderService.validatePurchase(request);
 
         // 4. 创建本次请求的服务端受理时间
         LocalDateTime acceptedAt =
@@ -387,11 +421,4 @@ public class OrderSubmissionService {
         // 不直接调用MySQL建单方法。
         return reservationService.reserveAsync(message);
     }
-
-
-
-
-    // TODO: 接入Redis预扣及结果回写，当前仍使用MySQL库存流程。
-    // TODO: 增加按当前用户和requestId查询下单结果的接口。
-    // TODO: 数据库提交结果未知等异常，需要查询确认，不能直接回补Redis。
 }

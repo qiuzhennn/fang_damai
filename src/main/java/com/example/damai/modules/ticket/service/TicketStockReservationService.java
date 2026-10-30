@@ -412,8 +412,4 @@ public class TicketStockReservationService {
 
         return previous;
     }
-    // TODO: 下单协调层先校验演出、场次和开售时间，再调用预扣。
-    // TODO: RESERVED_BEFORE不能直接再次创建订单，需要确认处理结果。
-    // TODO: ORDER_CREATED仍需查询数据库，不能仅凭Redis认定订单成功。
-    // TODO: 实现订单状态回写和补偿，再接入实际下单入口。
 }

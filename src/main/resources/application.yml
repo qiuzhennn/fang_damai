@@ -9,12 +9,21 @@ app:
   order:
     relay:
       enabled: ${ORDER_RELAY_ENABLED:true}
-      poll-ms: 1000
+      poll-ms: 100
 
     consumer:
       enabled: ${ORDER_CONSUMER_ENABLED:true}
     recovery:
       enabled: ${ORDER_RECOVERY_ENABLED:false}
+    rate-limit:
+      # 同一用户最多积累3次进入额度，每秒补充1次。
+      user-capacity: ${ORDER_RATE_USER_CAPACITY:3}
+      user-refill-per-second: ${ORDER_RATE_USER_REFILL:1}
+
+      # 所有用户共同竞争同一个票档的额度。
+      ticket-capacity: ${ORDER_RATE_TICKET_CAPACITY:100}
+      ticket-refill-per-second: ${ORDER_RATE_TICKET_REFILL:100}
+
 
 
 
@@ -58,7 +67,6 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
-
 
 logging:
   level:
