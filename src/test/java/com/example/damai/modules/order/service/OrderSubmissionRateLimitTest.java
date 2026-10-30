@@ -3,6 +3,7 @@ package com.example.damai.modules.order.service;
 import com.example.damai.common.exception.BusinessException;
 import com.example.damai.modules.order.dto.OrderCreateRequest;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
+import com.example.damai.modules.order.ratelimit.OrderAdmissionGuard;
 import com.example.damai.modules.order.ratelimit.PurchaseRateLimiter;
 import com.example.damai.modules.ticket.redis.StockReservationResult;
 import com.example.damai.modules.ticket.service.TicketStockReservationService;
@@ -24,11 +25,15 @@ class OrderSubmissionRateLimitTest {
         PurchaseRateLimiter rateLimiter =
                 mock(PurchaseRateLimiter.class);
 
+        OrderAdmissionGuard admissionGuard =
+                mock(OrderAdmissionGuard.class);
+
         OrderSubmissionService service = new OrderSubmissionService(
                 orderMapper,
                 orderService,
                 reservationService,
-                rateLimiter
+                rateLimiter,
+                admissionGuard
         );
 
         OrderCreateRequest request = new OrderCreateRequest();
@@ -64,7 +69,8 @@ class OrderSubmissionRateLimitTest {
         verifyNoInteractions(
                 rateLimiter,
                 orderService,
-                orderMapper
+                orderMapper,
+                admissionGuard
         );
 
         // 除了查询原购买，不得再次调用预扣等方法。

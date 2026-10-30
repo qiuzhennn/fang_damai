@@ -124,7 +124,8 @@ public class GlobalExceptionHandler {
             case "ACCOUNT_DISABLED" -> HttpStatus.FORBIDDEN;
 
             // 服务暂时无法完成资料加载，客户端可以稍后重试
-            case "PURCHASE_INFO_LOADING" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "PURCHASE_INFO_LOADING",
+                 "SYSTEM_BUSY"-> HttpStatus.SERVICE_UNAVAILABLE;
 
             // 当前购买请求超过用户或票档的受理额度。
             // 本次调用尚未预扣库存，提示稍后重试，不能展示成门票售罄。

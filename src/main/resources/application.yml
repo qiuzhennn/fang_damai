@@ -23,6 +23,9 @@ app:
       # 所有用户共同竞争同一个票档的额度。
       ticket-capacity: ${ORDER_RATE_TICKET_CAPACITY:100}
       ticket-refill-per-second: ${ORDER_RATE_TICKET_REFILL:100}
+    admission:
+      # 当前Java实例最多同时执行多少个新购买受理请求。
+      max-concurrent: ${ORDER_ADMISSION_MAX_CONCURRENT:50}
 
 
 

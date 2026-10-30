@@ -16,7 +16,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-
+import com.example.damai.modules.order.ratelimit.OrderAdmissionGuard;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -37,6 +37,8 @@ public class OrderSubmissionService {
     private final TicketStockReservationService reservationService;
 
     private final PurchaseRateLimiter purchaseRateLimiter;
+    private final OrderAdmissionGuard orderAdmissionGuard;
+
 
     private static final Logger log =
             LoggerFactory.getLogger(OrderSubmissionService.class);
@@ -45,12 +47,15 @@ public class OrderSubmissionService {
             TicketOrderMapper orderMapper,
             TicketOrderService orderService,
             TicketStockReservationService reservationService,
-            PurchaseRateLimiter purchaseRateLimiter) {
+            PurchaseRateLimiter purchaseRateLimiter,
+            OrderAdmissionGuard orderAdmissionGuard) {
 
         this.orderMapper = orderMapper;
         this.orderService = orderService;
         this.reservationService = reservationService;
         this.purchaseRateLimiter = purchaseRateLimiter;
+        this.orderAdmissionGuard = orderAdmissionGuard;
+
     }
 
 
@@ -334,6 +339,11 @@ public class OrderSubmissionService {
             return previous;
         }
 
+        // 已受理的购买在前面恢复结果。
+       // 只有新购买才竞争当前实例的受理名额。
+        orderAdmissionGuard.enter();
+
+
         //当这不是重复请求时，检查是否频繁购买
         try {
             purchaseRateLimiter.check(userId, request.getTicketCategoryId());
@@ -358,6 +368,10 @@ public class OrderSubmissionService {
             // 当前仍未查到原购买已受理，保留本次限流拒绝结果。
             // 这不代表另一个并发调用之后一定不会受理成功。
             throw exception;
+        }finally {
+            // 正常返回、业务拒绝或系统异常，都会结束当前受理调用。
+            // 后台建单由消息消费端继续处理，不再占用这个名额。
+            orderAdmissionGuard.leave();
         }
 
 
