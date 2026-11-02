@@ -5,6 +5,8 @@ app:
     password: ${ADMIN_BOOTSTRAP_PASSWORD:}
   rabbitmq:
     init-on-startup: ${RABBITMQ_INIT_ON_STARTUP:false}
+    management:
+      base-url: ${RABBITMQ_MANAGEMENT_URL:http://127.0.0.1:15672}
 
   order:
     relay:
@@ -29,6 +31,13 @@ app:
     backlog:
       # 尚未确认转发完成的任务达到阈值时，暂停受理新购买。
       max-outbox-pending: ${ORDER_BACKLOG_MAX_OUTBOX_PENDING:1000}
+      # 每次查询结束后，等待多久再查询RabbitMQ队列状态。
+      rabbitmq-refresh-ms: ${ORDER_BACKLOG_RABBITMQ_REFRESH_MS:1000}
+      # 距离上次成功查询超过这个时间，就不能再凭旧状态受理新购买。
+      rabbitmq-max-age-ms: ${ORDER_BACKLOG_RABBITMQ_MAX_AGE_MS:5000}
+      # 正常建单队列中尚未确认处理完成的消息达到阈值时，暂停新购买。
+      max-rabbitmq-pending: ${ORDER_BACKLOG_MAX_RABBITMQ_PENDING:1000}
+
 
 
 
@@ -70,6 +79,7 @@ spring:
     publisher-returns: true
     template:
       mandatory: true
+
 
 server:
   port: ${SERVER_PORT:8080}

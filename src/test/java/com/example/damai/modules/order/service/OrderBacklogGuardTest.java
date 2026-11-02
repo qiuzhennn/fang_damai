@@ -12,15 +12,44 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import com.example.damai.modules.order.ratelimit.RabbitQueueBacklogCache;
 
 class OrderBacklogGuardTest {
 
-    private final StringRedisTemplate redisTemplate =
-            mock(StringRedisTemplate.class);
+    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+
+    private final RabbitQueueBacklogCache rabbitQueueBacklogCache = mock(RabbitQueueBacklogCache.class);
 
     // 使用较小阈值，验证边界：达到3个待转发任务就拒绝。
-    private final OrderBacklogGuard guard =
-            new OrderBacklogGuard(redisTemplate, 3);
+    private final OrderBacklogGuard guard = new OrderBacklogGuard(redisTemplate,  rabbitQueueBacklogCache,3,3);
+
+
+
+    @Test
+    void rabbitmqBacklogShouldRejectAndRecover() {
+        when(rabbitQueueBacklogCache.readPendingCount())
+                .thenReturn(3L);
+
+        // RabbitMQ积压已达到阈值，暂停当前新购买。
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                guard::check
+        );
+
+        assertEquals("SYSTEM_BUSY", exception.getCode());
+
+        // 已经确定消费者承接压力过大，本次检查应在访问Redis前结束。
+        verifyNoInteractions(redisTemplate);
+
+        // 模拟消费者继续处理，积压下降到阈值以下。
+        when(rabbitQueueBacklogCache.readPendingCount())
+                .thenReturn(2L);
+
+        // 同时确认Redis待转发任务没有积压。
+        mockBacklog(0L);
+
+        assertDoesNotThrow(guard::check);
+    }
 
     @Test
     void noBacklogShouldAllowPurchase() {
