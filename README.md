@@ -164,7 +164,7 @@ mvn -Dtest=OrderCreateMessageTest,TicketStockReservationAsyncServiceTest test
 
 全量 `mvn test` 包含依赖中间件和专用测试数据的集成用例，需要先准备测试环境。
 
-开发阶段完成过 1000 次请求争抢 100 张票、确认 100 笔订单的验证，也测试了取消回补、重复释放任务及受理保护恢复。压测脚本和完整结果待归档。
+
 
 ```bash
 mvn -DskipTests clean package
