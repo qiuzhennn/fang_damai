@@ -103,7 +103,7 @@ public class TicketStockReservationService {
             );
         }
 
-        // 复用现有用户、requestId、票档、数量校验
+        //用户、requestId、票档、数量校验
         validate(
                 message.userId(),
                 message.requestId(),
@@ -246,17 +246,29 @@ public class TicketStockReservationService {
         }
     }
 
+    public StockReservationResult readRequestState(
+            Long userId,
+            String requestId,
+            Long ticketCategoryId,
+            Integer quantity) {
+
+        return readStoredRequestState(
+                userId, requestId, ticketCategoryId, quantity, false
+        );
+    }
+
     /**
      * 读取同一次购买的Redis请求状态。
      *
      * 返回null：当前没有请求记录。
      * 此方法只读取，不创建记录，也不扣减库存。
      */
-    public StockReservationResult readRequestState(
+    private StockReservationResult readStoredRequestState(
             Long userId,
             String requestId,
             Long ticketCategoryId,
-            Integer quantity) {
+            Integer quantity,
+            boolean requireAsync) {
 
         // 进行参数校验
         validate(userId, requestId, ticketCategoryId, quantity);
@@ -291,20 +303,23 @@ public class TicketStockReservationService {
             );
         }
 
-        // 使用已有枚举，向协调层表达处理状态
-        return switch (status.toString()) {
-            case "RESERVED" ->
-                    StockReservationResult.RESERVED_BEFORE;
-
-            case "ORDER_CREATED" ->
-                    StockReservationResult.ORDER_CREATED;
-
-            case "COMPENSATED" ->
-                    StockReservationResult.COMPENSATED;
-
-            default ->
-                    throw new IllegalStateException("Redis请求状态异常");
+        StockReservationResult result = switch (status.toString()) {
+            case "RESERVED" -> StockReservationResult.RESERVED_BEFORE;
+            case "ORDER_CREATED" -> StockReservationResult.ORDER_CREATED;
+            case "COMPENSATED" -> StockReservationResult.COMPENSATED;
+            default -> throw new IllegalStateException("Redis请求状态异常");
         };
+
+        // 异步购买只能恢复由异步流程受理的原请求。
+        // mode 已包含在本次读取的记录中，可以直接核对。
+        if (requireAsync && !"ASYNC".equals(record.get("mode"))) {
+            throw new BusinessException(
+                    "REQUEST_MODE_CONFLICT",
+                    "同一请求不能在同步和异步模式之间切换"
+            );
+        }
+
+        return result;
     }
 
     /**
@@ -372,12 +387,8 @@ public class TicketStockReservationService {
     }
 
     /**
-     * 查询原有异步购买请求。
-     *
-     * 返回null：尚未受理，可以申请新的预扣。
-     * 返回状态：已经受理，不重复扣库存。
-     *
-     * 不允许拿同步请求ID进入异步流程。
+     * 恢复同一次异步购买的处理状态。
+     * 核对原购买参数，并确认该请求确实由异步流程受理。
      */
     public StockReservationResult readAsyncRequestState(
             Long userId,
@@ -385,31 +396,8 @@ public class TicketStockReservationService {
             Long ticketCategoryId,
             Integer quantity) {
 
-        StockReservationResult previous =
-                readRequestState(
-                        userId,
-                        requestId,
-                        ticketCategoryId,
-                        quantity
-                );
-
-        if (previous == null) {
-            return null;
-        }
-
-        String requestKey =
-                TicketRedisKeys.request(userId, requestId);
-
-        Object mode = redisTemplate.opsForHash()
-                .get(requestKey, "mode");
-
-        if (!"ASYNC".equals(mode)) {
-            throw new BusinessException(
-                    "REQUEST_MODE_CONFLICT",
-                    "同一请求不能在同步和异步模式之间切换"
-            );
-        }
-
-        return previous;
+        return readStoredRequestState(
+                userId, requestId, ticketCategoryId, quantity, true
+        );
     }
 }

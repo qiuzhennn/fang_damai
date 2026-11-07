@@ -14,6 +14,12 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 class OrderAdmissionGuardTest {
 
     private final TicketOrderMapper orderMapper =
@@ -118,6 +124,78 @@ class OrderAdmissionGuardTest {
         verifyNoMoreInteractions(reservationService);
         verifyNoInteractions(orderMapper);
         verify(backlogGuard).check();
+    }
+
+
+    @Test
+    void purchaseValidationInProgressShouldKeepCapacity() throws Exception {
+        OrderCreateRequest firstRequest = newRequest();
+        OrderCreateRequest secondRequest = newRequest();
+
+        CountDownLatch validationStarted = new CountDownLatch(1);
+        CountDownLatch allowValidationToFinish = new CountDownLatch(1);
+
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+
+        try {
+            when(orderService.validatePurchase(any(OrderCreateRequest.class)))
+                    .thenAnswer(invocation -> {
+                        OrderCreateRequest current = invocation.getArgument(0);
+
+                        if (current == firstRequest) {
+                            // 第一笔购买已经进入校验，仍在占用唯一受理名额。
+                            validationStarted.countDown();
+
+                            assertTrue(
+                                    allowValidationToFinish.await(5, TimeUnit.SECONDS),
+                                    "等待测试放行购买校验超时"
+                            );
+                        }
+
+                        // 校验结束后拒绝购买，验证异常退出也能归还名额。
+                        throw new BusinessException(
+                                "SALE_ENDED",
+                                "演出已开始，停止售票"
+                        );
+                    });
+
+            Future<?> firstCall = worker.submit(() -> {
+                BusinessException exception = assertThrows(
+                        BusinessException.class,
+                        () -> service.submitAsync(607L, firstRequest)
+                );
+
+                assertEquals("SALE_ENDED", exception.getCode());
+            });
+
+            // 确认第一笔正在校验，再让另一个用户发起新的购买。
+            assertTrue(
+                    validationStarted.await(5, TimeUnit.SECONDS),
+                    "第一笔购买未进入校验阶段"
+            );
+
+            BusinessException exception = assertThrows(
+                    BusinessException.class,
+                    () -> service.submitAsync(608L, secondRequest)
+            );
+
+            // 第一笔尚未结束，第二笔应因没有受理名额而被拒绝。
+            assertEquals("SYSTEM_BUSY", exception.getCode());
+            verify(orderService, never()).validatePurchase(secondRequest);
+
+            // 放行第一笔，等待它完成异常处理和名额释放。
+            allowValidationToFinish.countDown();
+            firstCall.get(5, TimeUnit.SECONDS);
+
+            // 第一笔结束后，后续购买应能重新取得名额。
+            assertDoesNotThrow(admissionGuard::enter);
+            admissionGuard.leave();
+
+        } finally {
+            // 即使断言失败，也要放行后台线程并关闭线程池。
+            allowValidationToFinish.countDown();
+            worker.shutdownNow();
+        }
     }
 
     private OrderCreateRequest newRequest() {

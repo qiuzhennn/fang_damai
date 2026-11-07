@@ -349,11 +349,11 @@ public class OrderSubmissionService {
             // 用户和票档额度允许后，再检查转发链路是否仍能承接新任务。积压达到阈值时，停止当前购买。
             orderBacklogGuard.check();
 
-            // 3.校验当前下单，是否满足演出条件
-            PurchaseInfo info = orderService.validatePurchase(request);
-
-            // 4.创建本次请求的服务端受理时间
+            // 3.创建本次请求的服务端受理时间
             LocalDateTime acceptedAt = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).truncatedTo(ChronoUnit.MILLIS);
+
+            // 4.校验当前下单，是否满足演出条件
+            PurchaseInfo info = orderService.validatePurchase(request);
 
             // 5.取出已校验的资料，供后面构造OrderCreateMessage使用。
             BigDecimal unitPrice = info.price();

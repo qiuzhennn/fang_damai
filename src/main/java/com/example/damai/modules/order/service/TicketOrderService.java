@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /**
@@ -471,9 +472,11 @@ public class TicketOrderService {
         // 缓存缺失时，TicketPurchaseCache内部负责加载及并发保护
         PurchaseInfo info = ticketPurchaseCache.get(request.getTicketCategoryId());
 
-        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
-
-        if (!now.isBefore(info.startTime())) {
+        //毫秒精度
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).truncatedTo(ChronoUnit.MILLIS);
+        //演出开始时间
+        LocalDateTime eventStartTime = info.startTime().truncatedTo(ChronoUnit.MILLIS);
+        if (!now.isBefore(eventStartTime)) {
             throw new BusinessException("SALE_ENDED", "演出已开始，停止售票");
         }
 
