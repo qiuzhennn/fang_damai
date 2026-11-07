@@ -9,8 +9,6 @@ import com.example.damai.modules.order.entity.TicketOrder;
 import com.example.damai.modules.order.mapper.AsyncOrderGuardMapper;
 import com.example.damai.modules.order.mapper.TicketOrderMapper;
 import com.example.damai.modules.order.mq.OrderCreateMessage;
-import com.example.damai.modules.program.entity.EventSession;
-import com.example.damai.modules.ticket.entity.TicketCategory;
 import com.example.damai.modules.ticket.mapper.TicketCategoryMapper;
 import com.example.damai.modules.ticket.redis.TicketPurchaseCache;
 import com.example.damai.modules.ticket.redis.TicketPurchaseCache.PurchaseInfo;
@@ -462,21 +460,6 @@ public class TicketOrderService {
     }
 
 
-
-
-
-
-
-
-    /**
-     * 本次校验得到的数据，供创建订单继续使用。
-     * 只是数据载体，不是新的Spring组件，也不是Redis缓存。
-     */
-    public record PurchaseContext(
-            TicketCategory category,
-            EventSession session
-    ) {
-    }
     /**
      * 读取购买资料并检查是否允许购买。
      *
@@ -488,6 +471,21 @@ public class TicketOrderService {
         // 缓存缺失时，TicketPurchaseCache内部负责加载及并发保护
         PurchaseInfo info = ticketPurchaseCache.get(request.getTicketCategoryId());
 
+        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
+
+        if (!now.isBefore(info.startTime())) {
+            throw new BusinessException("SALE_ENDED", "演出已开始，停止售票");
+        }
+
+
+        /*
+         * 时间资料可以缓存，但“现在是否允许购买”
+         * 必须使用每次请求的当前时间重新判断。
+         */
+        if (now.isBefore(info.saleStartTime())) {
+            throw new BusinessException("SALE_NOT_STARTED", "尚未到开售时间");
+        }
+
         // 演出必须已经上架
         if (!Integer.valueOf(1).equals(info.eventStatus())) {
             throw new BusinessException("EVENT_NOT_ON_SALE", "演出未上架");
@@ -498,19 +496,21 @@ public class TicketOrderService {
             throw new BusinessException("SESSION_NOT_ON_SALE", "场次未启售或已停售");
         }
 
-        LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
 
-        /*
-         * 时间资料可以缓存，但“现在是否允许购买”
-         * 必须使用每次请求的当前时间重新判断。
-         */
-        if (now.isBefore(info.saleStartTime())) {
-            throw new BusinessException("SALE_NOT_STARTED", "尚未到开售时间");
+
+        // 校验服务端价格能否作为合法的订单金额快照。
+        BigDecimal unitPrice = info.price();
+        if (unitPrice == null
+                || unitPrice.signum() < 0
+                || unitPrice.scale() > 2
+                || unitPrice.compareTo(
+                new BigDecimal("9999999999.99")
+        ) > 0) {
+
+            throw new IllegalStateException("票档价格快照不合法");
         }
 
-        if (!now.isBefore(info.startTime())) {
-            throw new BusinessException("SALE_ENDED", "演出已开始，停止售票");
-        }
+
 
         // 将已经读取、校验的资料交给后续创建方法使用
         return info;

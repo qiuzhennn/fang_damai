@@ -52,15 +52,6 @@ public interface StockReleaseTaskMapper {
     List<Long> selectPendingIds(@Param("limit") int limit);
 
 
-    /**
-     * 获取刚刚记录的释放任务ID，用于事务提交后立即执行。
-     */
-    @Select("""
-    SELECT id
-    FROM tr_stock_release_task
-    WHERE order_id = #{orderId}
-    """)
-    Long selectIdByOrderId(@Param("orderId") Long orderId);
 
     /**
      * 读取并锁住一条当前允许执行的任务。

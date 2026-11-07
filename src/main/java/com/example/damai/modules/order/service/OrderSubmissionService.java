@@ -314,132 +314,59 @@ public class OrderSubmissionService {
      * 不直接创建MySQL订单。
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    public StockReservationResult submitAsync(
-            Long userId,
-            OrderCreateRequest request) {
+    public StockReservationResult submitAsync(Long userId, OrderCreateRequest request) {
 
         // 1. 校验调用参数
         if (userId == null || userId <= 0 || request == null) {
-            throw new BusinessException(
-                    "INVALID_PARAM",
-                    "下单参数不合法"
-            );
+            throw new BusinessException("INVALID_PARAM", "下单参数不合法");
         }
 
-        // 2. 优先查询同一次异步购买
-        //
-        // 必须先查询旧请求，不能先验证当前销售状态。
-        // 因为用户重试时，演出可能已经停售，
-        // 但原来受理的请求仍然需要返回原处理状态。
-        StockReservationResult previous =
-                reservationService.readAsyncRequestState(
-                        userId,
-                        request.getRequestId(),
-                        request.getTicketCategoryId(),
-                        request.getQuantity()
-                );
+        // 2. 优先查询同一次异步购买，查询是否已经发出相同的请求。
+        StockReservationResult previous = reservationService.readAsyncRequestState(userId, request.getRequestId(), request.getTicketCategoryId(), request.getQuantity());
+        //如果先前的请求存在且被相应处理，则返回处理结果。
+        if (previous != null) {return previous;}
 
-        if (previous != null) {
-            return previous;
-        }
-
-        // 已受理的购买在前面恢复结果。
-       // 只有新购买才竞争当前实例的受理名额。
+        // 新购买竞争当前实例的受理名额，目的是限流
         orderAdmissionGuard.enter();
-
-
-        //当这不是重复请求时，检查是否频繁购买
         try {
-            purchaseRateLimiter.check(userId, request.getTicketCategoryId());
 
-        } catch (BusinessException exception) {
-            // 限流判断期间，另一个相同请求可能已经完成Redis预扣。
-            // 再核对一次，避免将已经受理的购买误报为新购买被拒绝。
-            StockReservationResult latest =
-                    reservationService.readAsyncRequestState(
-                            userId,
-                            request.getRequestId(),
-                            request.getTicketCategoryId(),
-                            request.getQuantity()
-                    );
+            try {
+                //当这不是重复请求时，检查是否频繁购买（频繁操作）
+                purchaseRateLimiter.check(userId, request.getTicketCategoryId());
 
-            if (latest != null) {
+            } catch (BusinessException exception) {
+                // 限流判断期间，另一个相同请求可能已经完成Redis预扣。再核对一次，避免将已经受理的购买误报为新购买被拒绝。
+                StockReservationResult latest = reservationService.readAsyncRequestState(userId, request.getRequestId(), request.getTicketCategoryId(), request.getQuantity());
                 // 同一次购买已经受理，返回它的实际处理阶段。
-                // 不再次预扣库存，也不再次登记建单任务。
-                return latest;
+                if (latest != null) {
+                    return latest;
+                }
+
+                // 当前仍未查到原购买已受理，保留本次限流拒绝结果。
+                throw exception;
             }
 
-            // 当前仍未查到原购买已受理，保留本次限流拒绝结果。
-            // 这不代表另一个并发调用之后一定不会受理成功。
-            throw exception;
+            // 用户和票档额度允许后，再检查转发链路是否仍能承接新任务。积压达到阈值时，停止当前购买。
+            orderBacklogGuard.check();
+
+            // 3.校验当前下单，是否满足演出条件
+            PurchaseInfo info = orderService.validatePurchase(request);
+
+            // 4.创建本次请求的服务端受理时间
+            LocalDateTime acceptedAt = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).truncatedTo(ChronoUnit.MILLIS);
+
+            // 5.取出已校验的资料，供后面构造OrderCreateMessage使用。
+            BigDecimal unitPrice = info.price();
+            LocalDateTime eventStartTime = info.startTime().truncatedTo(ChronoUnit.MILLIS);
+
+            // 6. 异步建单任务
+            OrderCreateMessage message = new OrderCreateMessage(userId, request.getRequestId(), request.getTicketCategoryId(), request.getQuantity(), unitPrice, eventStartTime, acceptedAt);
+
+            // 7. 执行Redis Lua原子预扣并将待建单任务写入Redis Stream,取得本次受理结果。
+            return reservationService.reserveAsync(message);
         }finally {
-            // 正常返回、业务拒绝或系统异常，都会结束当前受理调用。
-            // 后台建单由消息消费端继续处理，不再占用这个名额。
+            //本次受理正常返回或异常结束后，统一归还名额。
             orderAdmissionGuard.leave();
         }
-
-        // 用户和票档额度允许后，再检查转发链路是否仍能承接新任务。
-        // 积压达到阈值时，停止当前购买，此时尚未预扣库存。
-        orderBacklogGuard.check();
-
-        // 3. 只有新请求才检查是否允许购买
-        //
-        // 复用同步流程已有的校验能力。
-        // 价格和演出时间均来自服务端。
-        PurchaseInfo info = orderService.validatePurchase(request);
-
-        // 4. 创建本次请求的服务端受理时间
-        LocalDateTime acceptedAt =
-                LocalDateTime.now(ZoneId.of("Asia/Shanghai"))
-                        .truncatedTo(ChronoUnit.MILLIS);
-
-        LocalDateTime eventStartTime =
-                info.startTime()
-                        .truncatedTo(ChronoUnit.MILLIS);
-
-        // 5. 防止购买条件校验后，
-        // 演出刚好已经开始。
-        if (!acceptedAt.isBefore(eventStartTime)) {
-            throw new BusinessException(
-                    "SALE_ENDED",
-                    "演出已开始，停止售票"
-            );
-        }
-
-        // 6. 保证服务端价格快照能够合法写入订单
-        BigDecimal unitPrice = info.price();
-
-        if (unitPrice == null
-                || unitPrice.signum() < 0
-                || unitPrice.scale() > 2
-                || unitPrice.compareTo(
-                new BigDecimal("9999999999.99")
-        ) > 0) {
-
-            throw new IllegalStateException(
-                    "票档价格快照不合法"
-            );
-        }
-
-        // 7. 构造异步建单任务
-        //
-        // 用户ID来自登录身份。
-        // 单价和演出时间来自服务端。
-        OrderCreateMessage message =
-                new OrderCreateMessage(
-                        userId,
-                        request.getRequestId(),
-                        request.getTicketCategoryId(),
-                        request.getQuantity(),
-                        unitPrice,
-                        eventStartTime,
-                        acceptedAt
-                );
-
-        // 8. 执行Redis Lua原子预扣
-        // 并将待建单任务写入Redis Stream
-        //
-        // 不直接调用MySQL建单方法。
-        return reservationService.reserveAsync(message);
     }
 }

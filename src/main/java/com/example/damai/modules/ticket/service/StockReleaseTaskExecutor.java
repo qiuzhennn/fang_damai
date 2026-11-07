@@ -6,13 +6,10 @@ import com.example.damai.modules.ticket.redis.TicketRedisKeys;
 import com.example.damai.modules.ticket.redis.TicketStockScriptExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.Map;
 
 @Service
@@ -33,20 +30,14 @@ public class StockReleaseTaskExecutor {
 
 
 
-    public StockReleaseTaskExecutor(
-            StockReleaseTaskMapper taskMapper,
-            TicketStockScriptExecutor executor,
-            @Qualifier("ticketStockReleaseClosedScript")
-            DefaultRedisScript<Long> releaseClosedScript) {
-
+    public StockReleaseTaskExecutor(StockReleaseTaskMapper taskMapper, TicketStockScriptExecutor executor) {
         this.taskMapper = taskMapper;
         this.executor = executor;
-
     }
 
     /**
-     * 执行一条已提交关单事务留下的Redis库存释放任务。
-     * 立即执行和后台扫描都调用这里。
+     * 执行关单事务已经提交的库存释放任务。
+     * 后台扫描到待执行任务后，调用这里回补 Redis 库存。
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void execute(Long taskId) {
