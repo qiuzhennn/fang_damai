@@ -9,8 +9,6 @@ import com.example.damai.modules.ticket.redis.TicketRedisKeys;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
@@ -22,8 +20,7 @@ import java.util.Objects;
  * 目前仅支持：
  * 演出已经开始，而订单尚未成功创建的场景。
  *
- * 本类只负责取得MySQL Guard补偿资格，
- * 不执行Redis库存回补。
+ * 本类只负责取得MySQL Guard补偿资格，不执行Redis库存回补。
  */
 @Service
 public class AsyncOrderCompensationClaimService {
@@ -245,93 +242,19 @@ public class AsyncOrderCompensationClaimService {
             OrderCreateMessage message,
             String outboxId) {
 
-        // 1. 消息不能为空
         if (message == null) {
+            throw new IllegalArgumentException("补偿消息不能为空");
+        }
+
+        if (!message.hasValidFields()) {
             throw new IllegalArgumentException(
-                    "补偿消息不能为空"
+                    "补偿消息中的购买资料不合法"
             );
         }
 
-        // 2. 用户ID
-        if (message.userId() == null
-                || message.userId() <= 0) {
+        if (outboxId == null || !outboxId.matches("^[0-9]+-[0-9]+$")) {
             throw new IllegalArgumentException(
-                    "用户ID不合法：" + message.userId()
-            );
-        }
-
-        // 3. requestId
-        String requestId = message.requestId();
-
-        if (requestId == null
-                || !requestId.matches(
-                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        )) {
-
-            throw new IllegalArgumentException(
-                    "requestId格式不合法：" + requestId
-            );
-        }
-
-        // 4. 票档ID
-        if (message.ticketCategoryId() == null
-                || message.ticketCategoryId() <= 0) {
-
-            throw new IllegalArgumentException(
-                    "票档ID不合法：" + message.ticketCategoryId()
-            );
-        }
-
-        // 5. 购票数量
-        if (message.quantity() == null
-                || message.quantity() < 1
-                || message.quantity() > 6) {
-
-            throw new IllegalArgumentException(
-                    "购票数量不合法：" + message.quantity()
-            );
-        }
-
-        // 6. 价格快照
-        if (message.unitPrice() == null
-                || message.unitPrice().signum() < 0
-                || message.unitPrice().scale() > 2
-                || message.unitPrice().compareTo(
-                new BigDecimal("9999999999.99")
-        ) > 0) {
-
-            throw new IllegalArgumentException(
-                    "价格快照不合法：" + message.unitPrice()
-            );
-        }
-
-        // 7. 时间不能为空
-        if (message.eventStartTime() == null
-                || message.acceptedAt() == null) {
-
-            throw new IllegalArgumentException(
-                    "受理时间或演出开始时间为空"
-            );
-        }
-
-        // 8. 受理时间必须早于演出开始时间
-        if (!message.acceptedAt()
-                .isBefore(message.eventStartTime())) {
-
-            throw new IllegalArgumentException(
-                    "时间快照不合法：acceptedAt="
-                            + message.acceptedAt()
-                            + ", eventStartTime="
-                            + message.eventStartTime()
-            );
-        }
-
-        // 9. Redis Stream任务ID
-        if (outboxId == null
-                || !outboxId.matches("^[0-9]+-[0-9]+$")) {
-
-            throw new IllegalArgumentException(
-                    "outboxId不合法：" + outboxId
+                    "补偿任务标识不合法：" + outboxId
             );
         }
     }

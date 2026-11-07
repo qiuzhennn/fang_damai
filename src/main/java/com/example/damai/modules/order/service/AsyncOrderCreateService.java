@@ -250,30 +250,14 @@ public class AsyncOrderCreateService {
     private void validateMessage(
             OrderCreateMessage message,
             String outboxId) {
-
-        if (message == null
-                || message.userId() == null
-                || message.userId() <= 0
-                || message.ticketCategoryId() == null
-                || message.ticketCategoryId() <= 0
-                || message.quantity() == null
-                || message.quantity() < 1
-                || message.quantity() > 6
-                || message.requestId() == null
-                || !message.requestId().matches(
-                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        )
-                || message.unitPrice() == null
-                || message.unitPrice().signum() < 0
-                || message.eventStartTime() == null
-                || message.acceptedAt() == null
-                || !message.acceptedAt()
-                .isBefore(message.eventStartTime())
-                || outboxId == null
-                || !outboxId.matches("^[0-9]+-[0-9]+$")) {
-
+        if (message == null || !message.hasValidFields()) {
             throw new IllegalArgumentException(
-                    "异步建单消息参数不合法"
+                    "异步建单消息中的购买资料不合法"
+            );
+        }
+        if (outboxId == null || !outboxId.matches("^[0-9]+-[0-9]+$")) {
+            throw new IllegalArgumentException(
+                    "异步建单任务标识不合法：" + outboxId
             );
         }
     }

@@ -7,11 +7,8 @@ import com.example.damai.modules.order.mapper.AsyncOrderGuardMapper;
 import com.example.damai.modules.order.mq.OrderCreateMessage;
 import com.example.damai.modules.ticket.redis.TicketRedisKeys;
 import com.example.damai.modules.ticket.service.TicketStockReservationService;
-
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-
-import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Objects;
 
@@ -89,8 +86,7 @@ public class AsyncOrderCompensationService {
         // 第一步：查询MySQL Guard完整快照
         // ========================================
 
-        AsyncOrderGuardSnapshot guard =
-                guardMapper.findGuard(userId, requestId);
+        AsyncOrderGuardSnapshot guard = guardMapper.findGuard(userId, requestId);
 
         // 核对消息与Guard中的原始购买信息
         if (!AsyncOrderGuardVerifier.matches(
@@ -122,8 +118,7 @@ public class AsyncOrderCompensationService {
         // 第二步：防御性核对MySQL订单
         // ========================================
 
-        TicketOrder existing =
-                orderService.findByRequestId(
+        TicketOrder existing = orderService.findByRequestId(
                         userId,
                         requestId
                 );
@@ -361,105 +356,19 @@ public class AsyncOrderCompensationService {
             OrderCreateMessage message,
             String outboxId) {
 
-        // 1. 消息不能为空
         if (message == null) {
+            throw new IllegalArgumentException("补偿消息不能为空");
+        }
 
+        if (!message.hasValidFields()) {
             throw new IllegalArgumentException(
-                    "补偿消息不能为空"
+                    "补偿消息中的购买资料不合法"
             );
         }
 
-        // 2. 用户ID
-        if (message.userId() == null
-                || message.userId() <= 0) {
-
+        if (outboxId == null || !outboxId.matches("^[0-9]+-[0-9]+$")) {
             throw new IllegalArgumentException(
-                    "用户ID不合法："
-                            + message.userId()
-            );
-        }
-
-        // 3. requestId必须为UUID格式
-        String requestId = message.requestId();
-
-        if (requestId == null
-                || !requestId.matches(
-                "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-        )) {
-
-            throw new IllegalArgumentException(
-                    "requestId格式不合法："
-                            + requestId
-            );
-        }
-
-        // 4. 票档ID
-        if (message.ticketCategoryId() == null
-                || message.ticketCategoryId() <= 0) {
-
-            throw new IllegalArgumentException(
-                    "票档ID不合法："
-                            + message.ticketCategoryId()
-            );
-        }
-
-        // 5. 购票数量
-        if (message.quantity() == null
-                || message.quantity() < 1
-                || message.quantity() > 6) {
-
-            throw new IllegalArgumentException(
-                    "购票数量不合法："
-                            + message.quantity()
-            );
-        }
-
-        // 6. 单价快照
-        BigDecimal unitPrice = message.unitPrice();
-
-        if (unitPrice == null
-                || unitPrice.signum() < 0
-                || unitPrice.scale() > 2
-                || unitPrice.compareTo(
-                new BigDecimal("9999999999.99")
-        ) > 0) {
-
-            throw new IllegalArgumentException(
-                    "价格快照不合法："
-                            + unitPrice
-            );
-        }
-
-        // 7. 时间快照不能为空
-        if (message.eventStartTime() == null
-                || message.acceptedAt() == null) {
-
-            throw new IllegalArgumentException(
-                    "演出时间或受理时间不能为空"
-            );
-        }
-
-        // 8. 受理时间必须早于演出开始时间
-        if (!message.acceptedAt()
-                .isBefore(message.eventStartTime())) {
-
-            throw new IllegalArgumentException(
-                    "时间快照不合法，acceptedAt="
-                            + message.acceptedAt()
-                            + ", eventStartTime="
-                            + message.eventStartTime()
-            );
-        }
-
-        // 9. Redis Stream消息ID
-        if (outboxId == null
-                || !outboxId.matches(
-                "^[0-9]+-[0-9]+$"
-        )) {
-
-            throw new IllegalArgumentException(
-                    "outboxId格式不合法："
-                            + outboxId
+                    "补偿任务标识不合法：" + outboxId
             );
         }
     }
