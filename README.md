@@ -1,175 +1,186 @@
 # 仿大麦
 
-基于 Spring Boot、MySQL、Redis 和 RabbitMQ 的票务后端项目，包含用户登录、演出管理、场次管理、票档库存和订单等功能。
-
-目前支持同步下单和异步抢票，仍在持续开发中。
+基于 Spring Boot、MySQL、Redis 和 RabbitMQ 的票务后端项目，支持演出管理、异步抢票、订单管理和库存回补。
 
 ## 技术栈
 
-| 技术 | 版本 | 用途 |
-| --- | --- | --- |
-| Java | 17 | 开发语言 |
-| Spring Boot | 4.0.8 | 后端框架 |
-| Spring Security | 随 Spring Boot 管理 | Session 登录、角色权限、CSRF 防护 |
-| MyBatis-Plus | 3.5.17 | 数据访问与分页 |
-| MySQL | 8.4 | 业务数据、订单与库存事务 |
-| Redis | 7.4 | 库存预扣、请求记录、购买信息缓存、Stream 任务 |
-| Lua | — | Redis 库存与请求状态操作 |
-| RabbitMQ | — | 异步建单、消息确认与异常消息处理 |
-| Maven | 3.9+ | 构建与依赖管理 |
-| JUnit、Mockito | 随 Spring Boot 管理 | 单元测试与集成测试 |
+| 技术 | 用途 |
+| --- | --- |
+| Java 17、Spring Boot 4.0.8 | 后端开发 |
+| Spring Security、Spring Session Redis | 登录会话、角色权限、CSRF 防护 |
+| MyBatis-Plus 3.5.17、MySQL 8.4 | 业务数据、订单与库存事务 |
+| Redis 7.4、Lua | 库存预扣、请求记录、缓存与限流 |
+| Redis Stream、RabbitMQ | 建单任务登记、消息转发与消费 |
+| JUnit、Mockito | 单元测试与集成测试 |
 
 ## 已实现功能
 
-- [x] **用户与权限**：用户注册、登录、退出，管理员登录，用户与管理员接口权限隔离。
-- [x] **演出管理**：演出创建、分类、上架与下架，演出列表与详情查询。
-- [x] **场次与票档**：场次创建、启售与停售，票档创建、查询和库存预热。
-- [x] **购票下单**：同步下单、异步下单、重复请求识别、按请求标识查询订单。
-- [x] **订单管理**：本人订单列表、订单详情、取消订单、模拟支付、超时关单。
-- [x] **库存处理**：Redis Lua 预扣、MySQL 库存锁定、创建失败补偿、关单后的库存释放与重试。
-- [x] **消息处理**：Redis Stream 任务登记与转发、RabbitMQ 发布确认、手动 ACK、异常消息恢复和暂存。
+### 用户与票务管理
 
-## 下单流程
+- [x] 用户注册、登录、退出，管理员登录与初始化。
+- [x] Redis 保存登录会话，用户与管理员权限隔离、本人订单访问控制。
+- [x] 演出分类、演出上架与下架、场次启售与停售。
+- [x] 票档管理、购买资料缓存、库存预热与撤销预热。
 
-### 同步下单
+### 异步抢票与订单
 
-校验购买条件后，通过 Redis Lua 预扣库存，再在 MySQL 事务中锁定库存、创建待支付订单。订单创建成功后，将订单 ID 回写 Redis；确认创建失败后，退回预扣库存。（注意！！！在真正业务逻辑中，不使用该下单流程，目前只是用来对比学习。未来可以删掉该流程对应的接口和业务）
+- [x] Lua 原子执行库存预扣、购买请求记录和 Stream 任务登记。
+- [x] Relay 发布确认后 ACK Stream，支持 Pending 任务恢复。
+- [x] 通过请求标识、数据库唯一约束和 MySQL Guard 处理重复请求、消息重投与补偿资格。
+- [x] Guard、MySQL 库存锁定和订单创建在同一事务中提交，Redis 状态回写后确认消费消息。
+- [x] 订单列表、详情、按请求标识查询、取消、模拟支付和超时关单。
 
-### 异步下单
+### 抢票入口保护
 
-1. 校验购买条件，通过 Lua 预扣库存，同时记录购买请求并写入 Redis Stream。
-2. Relay 读取 Stream 任务，发布到 RabbitMQ，收到发布确认后确认 Stream 消息。
-3. 消费者通过 MySQL Guard 协调建单与补偿，在事务中锁定库存、创建订单。
-4. 回写 Redis 请求状态，处理完成后手动 ACK。
+- [x] 用户级、票档级令牌桶限流。
+- [x] 当前 Java 实例的新购买并发名额控制。
+- [x] Redis Stream 和 RabbitMQ 积压保护，积压下降后恢复受理。
 
-异步接口返回 `PROCESSING` 时，订单可能仍在创建，需要通过 `requestId` 查询结果。异常消息通过死信队列进入恢复流程，暂时无法确认结果的消息转入暂存队列。
+### 库存释放与异常处理
 
-每次购买使用一个小写 UUID 格式的 `requestId`，同一次购买重试时复用原值。数据库提交结果未知时保留预扣库存，确认结果后再处理。
+- [x] 关单、MySQL 库存释放和回补任务记录在同一事务中完成。
+- [x] 后台扫描任务，Lua 幂等回补 Redis，支持失败重试和异常待核对。
+- [x] 建单失败后的补偿资格申请与幂等回补基础服务。
+- [x] 死信消息对账、Redis 状态修复及无法确认消息的暂存。
 
-待支付订单通常保留 15 分钟；如果演出更早开始，则以演出开始时间为支付截止时间。取消或超时关单时，在 MySQL 事务中释放库存并登记 Redis 库存释放任务，由定时任务完成回补。
+## 业务流程
+
+### 异步抢票
+
+```mermaid
+flowchart TD
+    A["异步购票请求"] --> B{"同一次购买已有记录？"}
+    B -->|是| C["返回请求处理状态"]
+    B -->|否| D["限流、并发与积压检查"]
+    D --> E["校验购买条件"]
+    E --> F["Lua：预扣库存、记录请求、写入 Stream"]
+    F --> C
+    F --> G["Relay 转发 RabbitMQ"]
+    G --> J["发布确认后 ACK Stream"]
+    G --> H["消费者核对预扣与订单，幂等执行建单事务"]
+    H --> I["回写 Redis 状态，再 ACK RabbitMQ"]
+```
+
+购票入口为 `POST /user/orders/async`。返回 `PROCESSING` 表示已受理，随后通过 `GET /user/orders/by-request?requestId=...` 查询订单。
+
+每次新购买使用新的小写 UUID，同一次购买重试复用原 `requestId` 和购买参数。暂未查到订单不代表购买失败。
+
+！！！同步下单入口保留作学习对比，当前业务以异步抢票为主！！！
+
+### 取消与超时关单
+
+```mermaid
+flowchart TD
+    A["取消订单或超时关单"] --> B["MySQL 事务：关单、释放锁定库存、记录释放任务"]
+    B --> C["后台扫描已提交任务"]
+    C --> D["Lua 幂等回补 Redis"]
+    D --> E{"执行结果"}
+    E -->|成功或已执行| F["标记任务完成"]
+    E -->|暂时失败| G["安排重试"]
+    G --> C
+    E -->|数据异常| H["标记待核对"]
+```
+
+待支付订单通常保留 15 分钟，最晚不超过演出开始时间。MySQL 关单与 Redis 回补异步完成，释放任务重复执行不会重复增加库存。
 
 ## 项目结构
 
-```text
-fang-damai/
-├── pom.xml
-├── README.md
-└── src/
-    ├── main/
-    │   ├── java/com/example/damai/
-    │   │   ├── common/           # 配置、认证、异常处理、统一响应
-    │   │   └── modules/
-    │   │       ├── admin/        # 管理员
-    │   │       ├── user/         # 用户
-    │   │       ├── program/      # 演出、分类、场次
-    │   │       ├── ticket/       # 票档、缓存、库存
-    │   │       └── order/        # 订单、消息、补偿
-    │   └── resources/
-    │       ├── application.yml
-    │       └── lua/
-    └── test/
-```
+| 模块 | 职责 |
+| --- | --- |
+| [common](src/main/java/com/example/damai/common) | 配置、认证、异常与统一响应 |
+| [admin](src/main/java/com/example/damai/modules/admin)、[user](src/main/java/com/example/damai/modules/user) | 管理员与用户账户 |
+| [program](src/main/java/com/example/damai/modules/program) | 演出、分类、场次 |
+| [ticket](src/main/java/com/example/damai/modules/ticket) | 票档、缓存、库存与释放任务 |
+| [order](src/main/java/com/example/damai/modules/order) | 订单、受理保护、消息与补偿 |
 
 ## 本地启动
 
-启动前需要安装 JDK 17、Maven，并准备 MySQL、Redis 和 RabbitMQ。数据库初始化 SQL 和 Docker Compose 配置暂未添加。
+### 环境准备
 
-### 配置连接
+准备 JDK 17、Maven、MySQL、Redis 和启用 Management 插件的 RabbitMQ。
 
-连接配置位于 [application.yml](src/main/resources/application.yml)，通过环境变量设置：
+创建 `damai` 数据库并准备项目表结构。初始化 SQL、测试数据和 Compose 示例尚未整理进仓库。
 
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `DB_HOST` | `127.0.0.1` | MySQL 地址 |
-| `DB_PORT` | `3306` | MySQL 端口 |
-| `DB_NAME` | `damai` | 数据库名称 |
-| `DB_USERNAME` | `root` | MySQL 用户名 |
-| `DB_PASSWORD` | 必填 | MySQL 密码 |
-| `REDIS_HOST` | `127.0.0.1` | Redis 地址 |
-| `REDIS_PORT` | `6379` | Redis 端口 |
-| `REDIS_PASSWORD` | 空 | Redis 密码 |
-| `RABBITMQ_HOST` | `127.0.0.1` | RabbitMQ 地址 |
-| `RABBITMQ_PORT` | `5672` | AMQP 端口 |
-| `RABBITMQ_USER` | `damai` | RabbitMQ 用户名 |
-| `RABBITMQ_PASSWORD` | 必填 | RabbitMQ 密码 |
-| `SERVER_PORT` | `8080` | 应用端口 |
+### 连接配置
 
-Windows PowerShell：
+配置位于 [application.yml](src/main/resources/application.yml)，通过环境变量覆盖：
 
-```powershell
-$env:DB_PASSWORD = "your-mysql-password"
-$env:RABBITMQ_PASSWORD = "your-rabbitmq-password"
-mvn spring-boot:run
+| 环境变量 | 默认值 |
+| --- | --- |
+| `DB_HOST` / `DB_PORT` | `127.0.0.1` / `3306` |
+| `DB_NAME` / `DB_USERNAME` | `damai` / `root` |
+| `DB_PASSWORD` | 必填 |
+| `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` |
+| `REDIS_PASSWORD` | 空 |
+| `RABBITMQ_HOST` / `RABBITMQ_PORT` | `127.0.0.1` / `5672` |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `damai` / 必填 |
+| `RABBITMQ_MANAGEMENT_URL` | `http://127.0.0.1:15672` |
+
+IDEA 运行配置中的环境变量示例，替换密码和实际连接地址：
+
+```text
+DB_PASSWORD=your-mysql-password;RABBITMQ_PASSWORD=your-rabbitmq-password;RABBITMQ_MANAGEMENT_URL=http://127.0.0.1:15672;RABBITMQ_INIT_ON_STARTUP=true
 ```
 
-Linux / macOS：
-
-```bash
-export DB_PASSWORD='your-mysql-password'
-export RABBITMQ_PASSWORD='your-rabbitmq-password'
-mvn spring-boot:run
-```
-
-使用 IDEA 时，也可以在运行配置中填写环境变量。如果中间件部署在虚拟机或其他主机上，需要修改对应的连接地址。
+RabbitMQ 应用账号需提前创建，并具备队列声明、读写和 Management 查询权限。AMQP 与 Management HTTP 地址分别配置。
 
 ### 管理员初始化
 
-首次创建管理员时，设置以下环境变量后启动应用：
+首次启动时，将以下配置追加到 IDEA 已有的环境变量中：
 
 ```text
-ADMIN_BOOTSTRAP_ENABLED=true
-ADMIN_BOOTSTRAP_USERNAME=admin
-ADMIN_BOOTSTRAP_PASSWORD=your-admin-password
+ADMIN_BOOTSTRAP_ENABLED=true;ADMIN_BOOTSTRAP_USERNAME=admin;ADMIN_BOOTSTRAP_PASSWORD=change-this-admin-password
 ```
 
 用户名为 4～30 位小写字母、数字或下划线；密码为 12～64 个字符且不超过 72 字节。初始化完成后，将 `ADMIN_BOOTSTRAP_ENABLED` 设为 `false`。
 
+管理员登录接口为 `POST /admin/auth/login`。
+
 ### RabbitMQ 配置
 
-`RABBITMQ_INIT_ON_STARTUP=true` 可在启动时显式声明交换机、队列和绑定。
+`RABBITMQ_INIT_ON_STARTUP=true` 用于启动时声明交换机、队列和绑定。正常转发与建单消费者默认开启，死信恢复消费者通过 `ORDER_RECOVERY_ENABLED=true` 启用。
 
-正常建单队列 `damai.order.create.queue` 需要配置死信策略，死信交换机为 `damai.order.dlx`，路由键为 `order.create.failed`。
+为正常建单队列 `damai.order.create.queue` 配置死信策略：交换机 `damai.order.dlx`，路由键 `order.create.failed`。队列定义见 [RabbitMqConfig](src/main/java/com/example/damai/common/config/RabbitMqConfig.java)。
 
-| 环境变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `ORDER_RELAY_ENABLED` | `true` | Stream 任务转发 |
-| `ORDER_CONSUMER_ENABLED` | `true` | 建单消费者 |
-| `ORDER_RECOVERY_ENABLED` | `false` | 异常消息恢复消费者 |
+### 启动应用
 
-### 接口调用
+在 IDEA 中运行 `com.example.damai.DamaiApplication`，默认端口 `8080`。终端启动时，先在终端设置相同的环境变量，再执行：
 
-通过 `GET /auth/csrf` 获取 CSRF token。注册、登录及修改数据的请求需要携带 token 和对应的 Session Cookie。
-
-HTTP 请求示例位于 `src/main/java/com/example/damai/common/web/`。
-
-抢票前先创建演出、场次和票档，预热库存后再启售。库存预热接口为：
-
-```text
-POST /admin/ticket-categories/{id}/stock/warmup
+```bash
+mvn spring-boot:run
 ```
 
-预热时，场次需要处于待开售或停售状态，且没有锁定库存或未完成的库存释放任务。
+注册、登录和写请求需要先调用 `GET /auth/csrf`，保留 Session Cookie，并以返回的 `headerName` 为请求头名称、`token` 为值。
+
+库存需在场次待开售或停售时，通过 `POST /admin/ticket-categories/{id}/stock/warmup` 预热，再将场次启售。
 
 ## 测试与打包
 
-集成测试需要连接 MySQL、Redis 或 RabbitMQ，运行前请准备独立的测试环境。
+单元测试示例：
 
 ```bash
-# 测试
-mvn test
+mvn -Dtest=OrderCreateMessageTest,TicketStockReservationAsyncServiceTest test
+```
 
-# 打包
-mvn clean package
+全量 `mvn test` 包含依赖中间件和专用测试数据的集成用例，需要先准备测试环境。
 
-# 启动
+开发阶段完成过 1000 次请求争抢 100 张票、确认 100 笔订单的验证，也测试了取消回补、重复释放任务及受理保护恢复。压测脚本和完整结果待归档。
+
+```bash
+mvn -DskipTests clean package
 java -jar target/fang-damai-0.0.1-SNAPSHOT.jar
 ```
 
-## 后续计划
+## 后续任务
 
-- [ ] 完善抢票限流和热点票档保护。
-- [ ] 优化 Redis 缓存与库存预扣。
-- [ ] 优化异步建单的消息转发和消费效率。
-- [ ] 完善订单幂等、库存补偿和故障恢复。
-- [ ] 优化高并发下的数据库锁竞争与事务处理。
-- [ ] 支持多实例运行，完善任务协调。
+### 本阶段收尾
+
+- [ ] 补齐数据库初始化 SQL、索引和基础测试数据。
+- [ ] 提供 Compose 与环境变量示例。
+- [ ] 归档压测脚本、脱敏结果和演示流程。
+
+### 后续扩展
+
+- [ ] 完善购买请求终态查询，以及暂存消息和补偿服务的受控处理入口。
+- [ ] 验证多实例受理额度、任务协调与故障恢复。
+- [ ] 接入真实支付。
