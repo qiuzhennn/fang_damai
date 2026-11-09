@@ -1,0 +1,53 @@
+name: damai-infra
+
+services:
+  redis:
+    image: redis:7.4
+    container_name: damai-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - damai-redis-data:/data
+
+  mysql:
+    image: public.ecr.aws/docker/library/mysql:8.4
+    container_name: damai-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请设置MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: damai
+      MYSQL_USER: damai
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?请设置MYSQL_APP_PASSWORD}
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - damai-mysql-data:/var/lib/mysql
+
+  rabbitmq:
+    image: public.ecr.aws/docker/library/rabbitmq:4-management
+    container_name: damai-rabbitmq
+    hostname: damai-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: damai
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?请设置RabbitMQ密码}
+    volumes:
+      - damai-rabbitmq-data:/var/lib/rabbitmq
+
+volumes:
+  damai-mysql-data:
+    external: true
+    name: damai-mysql-data
+
+  damai-redis-data:
+    external: true
+    name: damai-redis-data
+
+  damai-rabbitmq-data:
+    external: true
+    name: damai-rabbitmq-data

@@ -58,7 +58,7 @@
 
 其余购票请求中，9,242 次被限流或过载保护拒绝，608 次返回库存不足。已受理购买全部查询到订单。
 
-测试日期：2026-11-09。本地单实例，后端与压测器同机运行并复用连接。P95 为 HTTP 响应耗时；票数按已确认购买的请求数量汇总。[测试环境、完整结果与排查记录](docs/load-test.md)。
+本地单实例，后端与压测器同机运行并复用连接。P95 为 HTTP 响应耗时；票数按已确认购买的请求数量汇总。[测试环境、完整结果与排查记录](docs/load-test.md)。
 
 ## 业务流程
 
@@ -109,14 +109,46 @@ flowchart TD
 | [program](src/main/java/com/example/damai/modules/program) | 演出、分类、场次 |
 | [ticket](src/main/java/com/example/damai/modules/ticket) | 票档、缓存、库存与释放任务 |
 | [order](src/main/java/com/example/damai/modules/order) | 订单、受理保护、消息与补偿 |
+| [infra](infra) | Docker Compose 与环境变量示例 |
 
 ## 本地启动
 
 ### 环境准备
 
-准备 JDK 17、Maven、MySQL、Redis 和启用 Management 插件的 RabbitMQ。
+准备 JDK 17、Maven、Docker 和 Docker Compose v2。MySQL、Redis、RabbitMQ 的配置位于 [infra/compose.yaml](infra/compose.yaml)。
 
-创建 `damai` 数据库并准备项目表结构。初始化 SQL、测试数据和 Compose 示例尚未整理进仓库。
+以下命令在 Docker 所在机器的项目根目录执行。首次配置时复制环境变量示例，已有的 `.env` 继续沿用：
+
+```bash
+cp infra/.env.example infra/.env
+```
+
+编辑 `infra/.env`，填写三个密码。复用现有环境时，填写正在使用的密码。
+
+首次使用时创建持久化数据卷；已有同名卷会直接复用：
+
+```bash
+sudo docker volume create damai-mysql-data
+sudo docker volume create damai-redis-data
+sudo docker volume create damai-rabbitmq-data
+```
+
+检查配置并启动中间件：
+
+```bash
+sudo docker compose --env-file infra/.env -f infra/compose.yaml config --quiet
+sudo docker compose --env-file infra/.env -f infra/compose.yaml up -d
+sudo docker compose --env-file infra/.env -f infra/compose.yaml ps
+```
+
+日常停止和恢复服务：
+
+```bash
+sudo docker compose --env-file infra/.env -f infra/compose.yaml stop
+sudo docker compose --env-file infra/.env -f infra/compose.yaml start
+```
+
+MySQL 在空数据卷中首次启动时创建 `damai` 数据库和 `damai` 应用账号，已有数据卷沿用原数据和账号。项目表结构与测试数据需要另行导入，初始化 SQL 尚未整理进仓库。
 
 ### 连接配置
 
@@ -133,13 +165,17 @@ flowchart TD
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `damai` / 必填 |
 | `RABBITMQ_MANAGEMENT_URL` | `http://127.0.0.1:15672` |
 
-IDEA 运行配置中的环境变量示例，替换密码和实际连接地址：
+`infra/.env` 供 Compose 使用，IDEA 的环境变量需单独设置。使用 Compose 创建的 `damai` 数据库账号时，`DB_PASSWORD` 对应 `MYSQL_APP_PASSWORD`，RabbitMQ 密码对应 `RABBITMQ_PASSWORD`。
+
+IDEA 运行配置示例，替换密码和实际连接地址：
 
 ```text
-DB_PASSWORD=your-mysql-password;RABBITMQ_PASSWORD=your-rabbitmq-password;RABBITMQ_MANAGEMENT_URL=http://127.0.0.1:15672;RABBITMQ_INIT_ON_STARTUP=true
+DB_USERNAME=damai;DB_PASSWORD=your-mysql-app-password;RABBITMQ_PASSWORD=your-rabbitmq-password;RABBITMQ_MANAGEMENT_URL=http://127.0.0.1:15672;RABBITMQ_INIT_ON_STARTUP=true
 ```
 
-RabbitMQ 应用账号需提前创建，并具备队列声明、读写和 Management 查询权限。AMQP 与 Management HTTP 地址分别配置。
+后端与 Docker 同机时使用上表地址。Docker 在 Ubuntu 虚拟机时，MySQL、Redis 通过 SSH 隧道连接，后端填写实际转发端口；RabbitMQ 的 AMQP 和 Management HTTP 地址分别配置。
+
+Compose 首次初始化会创建 RabbitMQ 的 `damai` 账号。应用账号需具备队列声明、读写和 Management 查询权限。
 
 ### 管理员初始化
 
@@ -157,7 +193,13 @@ ADMIN_BOOTSTRAP_ENABLED=true;ADMIN_BOOTSTRAP_USERNAME=admin;ADMIN_BOOTSTRAP_PASS
 
 `RABBITMQ_INIT_ON_STARTUP=true` 用于启动时声明交换机、队列和绑定。正常转发与建单消费者默认开启，死信恢复消费者通过 `ORDER_RECOVERY_ENABLED=true` 启用。
 
-为正常建单队列 `damai.order.create.queue` 配置死信策略：交换机 `damai.order.dlx`，路由键 `order.create.failed`。队列定义见 [RabbitMqConfig](src/main/java/com/example/damai/common/config/RabbitMqConfig.java)。
+新环境首次配置时，等 RabbitMQ 启动完成，在 Docker 所在机器的项目根目录执行以下命令：
+
+```bash
+sudo docker compose --env-file infra/.env -f infra/compose.yaml exec rabbitmq rabbitmqctl set_policy damai-order-dlx '^damai[.]order[.]create[.]queue$' '{"dead-letter-exchange":"damai.order.dlx","dead-letter-routing-key":"order.create.failed"}' --apply-to queues
+```
+
+策略会应用到 `damai.order.create.queue`，交换机和队列由应用启动时声明；现有环境沿用原策略。队列定义见 [RabbitMqConfig](src/main/java/com/example/damai/common/config/RabbitMqConfig.java)。
 
 ### 启动应用
 
@@ -193,7 +235,7 @@ java -jar target/fang-damai-0.0.1-SNAPSHOT.jar
 ### 本阶段收尾
 
 - [ ] 补齐数据库初始化 SQL、索引和基础测试数据。
-- [ ] 提供 Compose 与环境变量示例。
+- [x] 提供 Compose 与环境变量示例。
 - [x] 整理 JMeter 压测结果与排查记录。
 - [ ] 归档压测脚本与演示流程。
 
